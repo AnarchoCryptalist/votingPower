@@ -1,0 +1,102 @@
+    // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Burnable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+contract StakingContract {
+    // ERC20 token being staked
+    IERC20 public stakedToken;
+    
+    // Mapping of stakers to their staked amount and last withdrawal date
+    mapping(address => uint256) public stakedAmount;
+    mapping(address => uint256) public lastWithdrawalDate;
+    
+    // ERC1155 NFT
+    ERC1155 public nftToken;
+    
+    // NFT ID counter
+    uint256 public nftId = 0;
+    
+    constructor(address _stakedToken, address _nftToken) {
+        stakedToken = IERC20(_stakedToken);
+        nftToken = ERC1155(_nftToken);
+    }
+
+contract StakingNFT is ERC1155, ERC1155Burnable {
+    using Counters for Counters.Counter;
+    using SafeMath for uint256;
+
+    Counters.Counter private _tokenIdTracker;
+
+    mapping(uint256 => uint256) private _tokenVotingPower;
+    mapping(address => uint256) public stakingBalance;
+    mapping(address => uint256) public stakingTimestamp;
+
+    uint256 constant SECONDS_IN_DAY = 86400;
+
+    constructor() ERC1155("") {
+        _tokenIdTracker.increment();
+    }
+
+    function setURI(string memory newuri) public {
+        _setURI(newuri);
+    }
+
+    function calculateVotingPower(address account) public view returns (uint256) {
+        uint256 balance = stakingBalance[account];
+        uint256 timestamp = stakingTimestamp[account];
+        uint256 age = block.timestamp.sub(timestamp);
+
+        uint256 votingPower = balance.mul(1e18).sqrt();
+
+        for (uint i = 30 days; i <= age && i <= 60 * 30 days; i += 30 days) {
+            votingPower = votingPower.mul(1000000000328632098702159).div(1e18);
+        }
+        if (age > 60 * 30 days) {
+            uint256 numIntervals = age.div(30 days).sub(60);
+            for (uint i = 0; i < numIntervals; i++) {
+                votingPower = votingPower.mul(1000000000328632098702159).div(1e18);
+            }
+        }
+
+        return votingPower.div(1e18);
+    }
+
+    function mintNFT(address receiver, uint256 amount) external {
+        // Calculate the current voting power based on the staking balance and age
+        uint256 currentVotingPower = calculateVotingPower(msg.sender);
+
+        // Mint the dynamic NFT with the appropriate voting power
+        uint256 tokenId = _tokenIdTracker.current();
+        _mint(receiver, tokenId, 1, "");
+        _tokenIdTracker.increment();
+        _setTokenVotingPower(tokenId, currentVotingPower);
+
+        // Update the user's staking balance and age
+        stakingBalance[msg.sender] = stakingBalance[msg.sender].add(amount);
+        stakingTimestamp[msg.sender] = block.timestamp;
+
+        // Emit an event for the new NFT minted
+        emit NFTMinted(tokenId, currentVotingPower, receiver);
+    }
+
+    function burnNFT(uint256 tokenId, uint256 amount) external {
+        require(_isApprovedOrOwner(msg.sender, tokenId), "caller is not owner nor approved");
+        _burn(msg.sender, tokenId, amount);
+        _setTokenVotingPower(tokenId, 0);
+    }
+
+    function _setTokenVotingPower(uint256 tokenId, uint256 votingPower) internal {
+        require(tokenId > 0, "Token ID must be greater than 0");
+        _tokenVotingPower[tokenId] = votingPower;
+    }
+
+    function getTokenVotingPower(uint256 tokenId) external view returns (uint256) {
+        return _tokenVotingPower[tokenId];
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
